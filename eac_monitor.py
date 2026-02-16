@@ -100,14 +100,25 @@ def check_status(driver):
     )
     btn.click()
 
-    WebDriverWait(driver, 15).until(
-        lambda d: any(
-            kw in d.find_element(By.TAG_NAME, "body").text.lower()
-            for kw in ["appeal", "ban", "under review"]
+    try:
+        WebDriverWait(driver, 10).until(
+            lambda d: any(
+                kw in d.find_element(By.TAG_NAME, "body").text.lower()
+                for kw in ["appeal", "ban", "under review"]
+            )
         )
-    )
+    except Exception:
+        pass
 
     page_text = driver.find_element(By.TAG_NAME, "body").text
+    # Corta o footer - pega so ate "Epic Games" ou primeiros 500 chars
+    for cutoff in ["Licensing", "Epic Games Store", "Terms of Service"]:
+        idx = page_text.find(cutoff)
+        if idx > 0:
+            page_text = page_text[:idx]
+            break
+    else:
+        page_text = page_text[:500]
 
     status_keywords = [
         "Appeal Pending",
@@ -124,7 +135,7 @@ def check_status(driver):
         if kw.lower() in page_text.lower():
             return kw
 
-    return "DESCONHECIDO: " + page_text[-200:]
+    return "DESCONHECIDO: " + page_text.strip()[-200:]
 
 
 def main():
