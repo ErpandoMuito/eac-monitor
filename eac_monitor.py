@@ -90,36 +90,6 @@ def create_driver():
 
 
 def check_status(driver):
-    driver.get(EAC_URL)
-
-    btn = WebDriverWait(driver, 20).until(
-        EC.element_to_be_clickable((By.XPATH,
-            "//*[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ',"
-            "'abcdefghijklmnopqrstuvwxyz'), 'check reference id')]"
-        ))
-    )
-    btn.click()
-
-    try:
-        WebDriverWait(driver, 10).until(
-            lambda d: any(
-                kw in d.find_element(By.TAG_NAME, "body").text.lower()
-                for kw in ["appeal", "ban", "under review"]
-            )
-        )
-    except Exception:
-        pass
-
-    page_text = driver.find_element(By.TAG_NAME, "body").text
-    # Corta o footer - pega so ate "Epic Games" ou primeiros 500 chars
-    for cutoff in ["Licensing", "Epic Games Store", "Terms of Service"]:
-        idx = page_text.find(cutoff)
-        if idx > 0:
-            page_text = page_text[:idx]
-            break
-    else:
-        page_text = page_text[:500]
-
     status_keywords = [
         "Appeal Pending",
         "Appeal Accepted",
@@ -130,10 +100,43 @@ def check_status(driver):
         "Under Review",
         "Permanently Banned",
     ]
+    status_lower = [kw.lower() for kw in status_keywords]
+
+    driver.get(EAC_URL)
+
+    btn = WebDriverWait(driver, 20).until(
+        EC.element_to_be_clickable((By.XPATH,
+            "//*[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ',"
+            "'abcdefghijklmnopqrstuvwxyz'), 'check reference id')]"
+        ))
+    )
+    btn.click()
+
+    # Espera ate uma das frases de status aparecer na pagina
+    try:
+        WebDriverWait(driver, 20).until(
+            lambda d: any(
+                kw in d.find_element(By.TAG_NAME, "body").text.lower()
+                for kw in status_lower
+            )
+        )
+    except Exception:
+        pass
+
+    page_text = driver.find_element(By.TAG_NAME, "body").text
 
     for kw in status_keywords:
         if kw.lower() in page_text.lower():
             return kw
+
+    # Se nao achou, corta footer pra mostrar o que tem
+    for cutoff in ["Licensing", "Epic Games Store", "Terms of Service", "Privacy Policy"]:
+        idx = page_text.find(cutoff)
+        if idx > 0:
+            page_text = page_text[:idx]
+            break
+    else:
+        page_text = page_text[:500]
 
     return "DESCONHECIDO: " + page_text.strip()[-200:]
 
