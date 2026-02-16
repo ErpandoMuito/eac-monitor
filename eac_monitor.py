@@ -63,7 +63,6 @@ def send_whatsapp(message):
 
 def create_driver():
     opts = uc.ChromeOptions()
-    opts.add_argument("--headless=new")
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--disable-gpu")
@@ -76,8 +75,19 @@ def create_driver():
     if chromedriver_path:
         kwargs["driver_executable_path"] = chromedriver_path
     driver = uc.Chrome(**kwargs)
-    driver.set_page_load_timeout(30)
+    driver.set_page_load_timeout(60)
     return driver
+
+
+def find_appeal_status(page_text):
+    skip = {'an', 'be', 'is', 'are', 'was', 'were', 'has', 'have', 'had',
+            'the', 'a', 'for', 'through', 'on', 'to', 'and', 'or', 'not',
+            'can', 'will', 'may', 'should', 'could', 'would', 'if', 'when',
+            'that', 'this', 'of', 'in', 'at', 'your', 'our', 'their'}
+    for m in re.finditer(r'\bappeal\b\s*[:\-]?\s*(\w+)', page_text, re.IGNORECASE):
+        if m.group(1).lower() not in skip:
+            return "Appeal " + m.group(1).capitalize()
+    return None
 
 
 def check_status(driver):
@@ -90,21 +100,25 @@ def check_status(driver):
         ))
     )
     btn.click()
-    time.sleep(5)
+
+    # Espera ate 60s pelo status do appeal aparecer na pagina
+    try:
+        WebDriverWait(driver, 60).until(
+            lambda d: find_appeal_status(
+                d.find_element(By.TAG_NAME, "body").text
+            ) is not None
+        )
+    except Exception:
+        pass
 
     page_text = driver.find_element(By.TAG_NAME, "body").text
+    logger.info("Texto da pagina (500 chars): " + page_text[:500])
 
-    # Busca "Appeal [Status]" na pagina (ex: Appeal Pending, Appeal Reversed)
-    # Ignora palavras que fazem parte de frases normais, nao sao status
-    skip = {'be', 'is', 'are', 'was', 'were', 'has', 'have', 'had', 'the',
-            'a', 'an', 'for', 'through', 'on', 'to', 'and', 'or', 'not',
-            'can', 'will', 'may', 'should', 'could', 'would', 'if', 'when',
-            'that', 'this', 'of', 'in', 'at', 'your', 'our', 'their'}
-    for m in re.finditer(r'\bappeal\b\s*[:\-]?\s*(\w+)', page_text, re.IGNORECASE):
-        if m.group(1).lower() not in skip:
-            return "Appeal " + m.group(1).capitalize()
+    status = find_appeal_status(page_text)
+    if status:
+        return status
 
-    return page_text.strip()[:500]
+    return "SEM STATUS - " + page_text.strip()[:300]
 
 
 def main():
