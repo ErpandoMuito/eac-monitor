@@ -2,12 +2,18 @@
 EAC Appeal Status Monitor - WhatsApp via Twilio
 Monitora o status do appeal a cada 1 hora e notifica via WhatsApp se mudar.
 
-INSTALAÇÃO:
+INSTALACAO:
 pip install selenium webdriver-manager twilio
 
-PARA RODAR:
-python eac_monitor.py
-“””
+CONFIGURACAO TWILIO (WhatsApp):
+
+1. Crie conta gratis em https://www.twilio.com/try-twilio
+1. No console, va em Messaging > Try it out > Send a WhatsApp message
+1. Vai aparecer um numero Twilio sandbox (ex: +14155238886)
+1. Mande “join <codigo>” pro numero do Twilio pelo seu WhatsApp pra ativar
+1. Pegue Account SID, Auth Token e o numero do sandbox no console
+1. Preencha as variaveis abaixo
+   “””
 
 import time
 import logging
@@ -18,19 +24,23 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-import os
+from webdriver_manager.chrome import ChromeDriverManager
 from twilio.rest import Client
 
 # ============================================
 
-# CONFIGURAÇÃO
+# CONFIGURACAO - PREENCHA AQUI
 
 # ============================================
 
-TWILIO_ACCOUNT_SID = “ACd9391742c4758eca6a10fbd06a9602e6”
-TWILIO_AUTH_TOKEN = “14c5db9d935f8bcd1faa86a612248501”
+# Twilio
+
+TWILIO_ACCOUNT_SID = “SEU_ACCOUNT_SID”
+TWILIO_AUTH_TOKEN = “SEU_AUTH_TOKEN”
 TWILIO_WHATSAPP_FROM = “whatsapp:+14155238886”
-MY_WHATSAPP_NUMBER = “whatsapp:+5511976762359”
+MY_WHATSAPP_NUMBER = “whatsapp:+5511999999999”
+
+# Monitor
 
 CHECK_INTERVAL = 3600
 REFERENCE_ID = “95727d1e-f75d-42bd-804b-78512bff11e8”
@@ -48,6 +58,7 @@ last_status = None
 twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
 def send_whatsapp(message: str):
+“”“Envia mensagem via WhatsApp (Twilio).”””
 try:
 msg = twilio_client.messages.create(
 body=message,
@@ -59,6 +70,7 @@ except Exception as e:
 logger.error(f”Erro ao enviar WhatsApp: {e}”)
 
 def create_driver():
+“”“Cria instancia do Chrome headless.”””
 opts = Options()
 opts.add_argument(”–headless=new”)
 opts.add_argument(”–no-sandbox”)
@@ -69,24 +81,11 @@ opts.add_argument(
 “user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) “
 “AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36”
 )
-# Usa Chromium do sistema (Docker) ou webdriver-manager (local)
-chrome_bin = os.environ.get(“CHROME_BIN”)
-chromedriver_path = os.environ.get(“CHROMEDRIVER_PATH”)
-
-```
-if chrome_bin:
-    opts.binary_location = chrome_bin
-
-if chromedriver_path:
-    svc = Service(chromedriver_path)
-else:
-    from webdriver_manager.chrome import ChromeDriverManager
-    svc = Service(ChromeDriverManager().install())
-
+svc = Service(ChromeDriverManager().install())
 return webdriver.Chrome(service=svc, options=opts)
-```
 
 def check_status() -> str | None:
+“”“Acessa a pagina do EAC, clica no botao e retorna o status.”””
 driver = None
 try:
 driver = create_driver()
@@ -94,6 +93,7 @@ logger.info(f”Acessando {EAC_URL}”)
 driver.get(EAC_URL)
 
 ```
+    # Espera o botao "Check reference ID" aparecer e clica
     btn = WebDriverWait(driver, 20).until(
         EC.element_to_be_clickable((By.XPATH,
             "//button[contains(text(), 'Check reference ID')]"
@@ -102,12 +102,15 @@ driver.get(EAC_URL)
         ))
     )
     btn.click()
-    logger.info("Botão 'Check reference ID' clicado")
+    logger.info("Botao 'Check reference ID' clicado")
 
+    # Espera o status aparecer
     time.sleep(5)
 
+    # Pega o texto da pagina
     page_text = driver.find_element(By.TAG_NAME, "body").text
 
+    # Procura por status conhecidos
     status_keywords = [
         "Appeal Pending",
         "Appeal Accepted",
@@ -150,10 +153,10 @@ logger.info(f"Intervalo: {CHECK_INTERVAL}s ({CHECK_INTERVAL // 60} min)")
 logger.info("=" * 50)
 
 send_whatsapp(
-    "🤖 EAC Monitor iniciado!\n\n"
-    f"📋 Reference ID: {REFERENCE_ID}\n"
-    f"⏰ Checando a cada {CHECK_INTERVAL // 60} minutos\n"
-    f"🕐 Início: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+    "EAC Monitor iniciado!\n\n"
+    f"Reference ID: {REFERENCE_ID}\n"
+    f"Checando a cada {CHECK_INTERVAL // 60} minutos\n"
+    f"Inicio: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
 )
 
 while True:
@@ -162,27 +165,29 @@ while True:
         status = check_status()
 
         if status is None:
-            logger.warning("Não foi possível obter o status")
+            logger.warning("Nao foi possivel obter o status")
             send_whatsapp(
-                "⚠️ Erro ao checar status\n"
-                "Não consegui acessar a página do EAC. Tentando de novo na próxima hora."
+                "Erro ao checar status\n"
+                "Nao consegui acessar a pagina do EAC. Tentando de novo na proxima hora."
             )
         elif last_status is None:
+            # Primeira checagem
             last_status = status
             send_whatsapp(
-                f"📊 Status atual do appeal:\n\n"
-                f"🔸 Status: {status}\n"
-                f"🕐 {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+                f"Status atual do appeal:\n\n"
+                f"Status: {status}\n"
+                f"{datetime.now().strftime('%d/%m/%Y %H:%M')}"
             )
         elif status != last_status:
+            # STATUS MUDOU!
             old = last_status
             last_status = status
             send_whatsapp(
-                "🚨🚨🚨 STATUS DO APPEAL MUDOU! 🚨🚨🚨\n\n"
-                f"🔹 Antes: {old}\n"
-                f"🔸 Agora: {status}\n\n"
-                f"🔗 Link: {EAC_URL}\n"
-                f"🕐 {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+                "STATUS DO APPEAL MUDOU!\n\n"
+                f"Antes: {old}\n"
+                f"Agora: {status}\n\n"
+                f"Link: {EAC_URL}\n"
+                f"{datetime.now().strftime('%d/%m/%Y %H:%M')}"
             )
         else:
             logger.info(f"Status inalterado: {status}")
@@ -190,7 +195,7 @@ while True:
     except Exception as e:
         logger.error(f"Erro no loop principal: {e}")
 
-    logger.info(f"Próxima checagem em {CHECK_INTERVAL // 60} minutos...")
+    logger.info(f"Proxima checagem em {CHECK_INTERVAL // 60} minutos...")
     time.sleep(CHECK_INTERVAL)
 ```
 
