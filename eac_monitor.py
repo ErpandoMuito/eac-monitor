@@ -65,16 +65,7 @@ def create_driver():
     opts = uc.ChromeOptions()
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
-    opts.add_argument("--disable-gpu")
-    opts.add_argument("--window-size=1920,1080")
-    chrome_bin = os.environ.get("CHROME_BIN")
-    if chrome_bin:
-        opts.binary_location = chrome_bin
-    chromedriver_path = os.environ.get("CHROMEDRIVER_PATH")
-    kwargs = {"options": opts}
-    if chromedriver_path:
-        kwargs["driver_executable_path"] = chromedriver_path
-    driver = uc.Chrome(**kwargs)
+    driver = uc.Chrome(options=opts, use_subprocess=True)
     driver.set_page_load_timeout(60)
     return driver
 
