@@ -1,6 +1,6 @@
 “””
 EAC Appeal Status Monitor - WhatsApp via Twilio
-Monitora o status do appeal a cada 1 hora e notifica via WhatsApp se mudar.
+Monitora o status do appeal a cada 10 minutos e notifica via WhatsApp SEMPRE.
 
 INSTALACAO:
 pip install selenium webdriver-manager twilio
@@ -42,7 +42,7 @@ MY_WHATSAPP_NUMBER = “whatsapp:+5511999999999”
 
 # Monitor
 
-CHECK_INTERVAL = 3600
+CHECK_INTERVAL = 600  # 600 segundos = 10 minutos
 REFERENCE_ID = “95727d1e-f75d-42bd-804b-78512bff11e8”
 EAC_URL = f”https://easy.ac/support/contact/appeal?referenceId={REFERENCE_ID}”
 
@@ -55,7 +55,29 @@ format=”%(asctime)s - %(levelname)s - %(message)s”
 logger = logging.getLogger(**name**)
 
 last_status = None
+attempt_count = 0
+start_time = None
 twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+
+def get_elapsed_time() -> str:
+“”“Retorna o tempo decorrido desde o inicio do monitoramento.”””
+if start_time is None:
+return “0min”
+delta = datetime.now() - start_time
+total_seconds = int(delta.total_seconds())
+days = total_seconds // 86400
+hours = (total_seconds % 86400) // 3600
+minutes = (total_seconds % 3600) // 60
+
+```
+parts = []
+if days > 0:
+    parts.append(f"{days}d")
+if hours > 0:
+    parts.append(f"{hours}h")
+parts.append(f"{minutes}min")
+return " ".join(parts)
+```
 
 def send_whatsapp(message: str):
 “”“Envia mensagem via WhatsApp (Twilio).”””
@@ -143,9 +165,11 @@ finally:
 ```
 
 def main():
-global last_status
+global last_status, attempt_count, start_time
 
 ```
+start_time = datetime.now()
+
 logger.info("=" * 50)
 logger.info("EAC Appeal Monitor (WhatsApp) iniciado!")
 logger.info(f"Reference ID: {REFERENCE_ID}")
@@ -156,41 +180,42 @@ send_whatsapp(
     "EAC Monitor iniciado!\n\n"
     f"Reference ID: {REFERENCE_ID}\n"
     f"Checando a cada {CHECK_INTERVAL // 60} minutos\n"
-    f"Inicio: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+    f"Inicio: {start_time.strftime('%d/%m/%Y %H:%M')}"
 )
 
 while True:
     try:
-        logger.info(f"Checando status... ({datetime.now().strftime('%H:%M:%S')})")
+        attempt_count += 1
+        elapsed = get_elapsed_time()
+
+        logger.info(f"Tentativa #{attempt_count} - {elapsed} monitorando")
         status = check_status()
 
         if status is None:
-            logger.warning("Nao foi possivel obter o status")
             send_whatsapp(
-                "Erro ao checar status\n"
-                "Nao consegui acessar a pagina do EAC. Tentando de novo na proxima hora."
+                f"Erro ao checar status\n"
+                f"Tentativa #{attempt_count} - {elapsed} monitorando\n"
+                f"Nao consegui acessar a pagina. Tentando de novo em 10 min."
             )
-        elif last_status is None:
-            # Primeira checagem
-            last_status = status
-            send_whatsapp(
-                f"Status atual do appeal:\n\n"
-                f"Status: {status}\n"
-                f"{datetime.now().strftime('%d/%m/%Y %H:%M')}"
-            )
-        elif status != last_status:
+        elif last_status is not None and status != last_status:
             # STATUS MUDOU!
             old = last_status
             last_status = status
             send_whatsapp(
                 "STATUS DO APPEAL MUDOU!\n\n"
-                f"Antes: {old}\n"
-                f"Agora: {status}\n\n"
+                f"ANTES: {old}\n"
+                f"AGORA: {status}\n\n"
+                f"Detectado na tentativa #{attempt_count} - {elapsed} monitorando\n"
                 f"Link: {EAC_URL}\n"
                 f"{datetime.now().strftime('%d/%m/%Y %H:%M')}"
             )
         else:
-            logger.info(f"Status inalterado: {status}")
+            # Status igual ou primeira checagem
+            last_status = status
+            send_whatsapp(
+                f"{status} - Tentativa #{attempt_count} em {elapsed}\n"
+                f"{datetime.now().strftime('%d/%m/%Y %H:%M')}"
+            )
 
     except Exception as e:
         logger.error(f"Erro no loop principal: {e}")
