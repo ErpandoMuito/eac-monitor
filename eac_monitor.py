@@ -1,6 +1,7 @@
 # EAC Appeal Status Monitor - WhatsApp via Twilio
 
 import os
+import re
 import time
 import logging
 from datetime import datetime
@@ -80,18 +81,6 @@ def create_driver():
 
 
 def check_status(driver):
-    status_keywords = [
-        "Appeal Pending",
-        "Appeal Accepted",
-        "Appeal Denied",
-        "Appeal Rejected",
-        "Ban Reverted",
-        "Ban Lifted",
-        "Under Review",
-        "Permanently Banned",
-    ]
-    status_lower = [kw.lower() for kw in status_keywords]
-
     driver.get(EAC_URL)
 
     btn = WebDriverWait(driver, 20).until(
@@ -101,33 +90,21 @@ def check_status(driver):
         ))
     )
     btn.click()
+    time.sleep(5)
 
-    # Espera o paragrafo que contem "ban appeal" aparecer apos o clique
-    try:
-        appeal_el = WebDriverWait(driver, 30).until(
-            lambda d: next(
-                (p for p in d.find_elements(By.TAG_NAME, "p")
-                 if "ban appeal" in p.text.lower()),
-                None
-            )
-        )
-    except Exception:
-        appeal_el = None
-
-    if appeal_el:
-        appeal_text = appeal_el.text
-        for kw in status_keywords:
-            if kw.lower() in appeal_text.lower():
-                return kw
-        return "DESCONHECIDO: " + appeal_text.strip()[:300]
-
-    # Fallback: busca no body inteiro
     page_text = driver.find_element(By.TAG_NAME, "body").text
-    for kw in status_keywords:
-        if kw.lower() in page_text.lower():
-            return kw
 
-    return "DESCONHECIDO (elemento nao encontrado): " + page_text.strip()[:300]
+    # Busca "Appeal [Status]" na pagina (ex: Appeal Pending, Appeal Reversed)
+    # Ignora palavras que fazem parte de frases normais, nao sao status
+    skip = {'be', 'is', 'are', 'was', 'were', 'has', 'have', 'had', 'the',
+            'a', 'an', 'for', 'through', 'on', 'to', 'and', 'or', 'not',
+            'can', 'will', 'may', 'should', 'could', 'would', 'if', 'when',
+            'that', 'this', 'of', 'in', 'at', 'your', 'our', 'their'}
+    for m in re.finditer(r'\bappeal\b\s*[:\-]?\s*(\w+)', page_text, re.IGNORECASE):
+        if m.group(1).lower() not in skip:
+            return "Appeal " + m.group(1).capitalize()
+
+    return page_text.strip()[:500]
 
 
 def main():
