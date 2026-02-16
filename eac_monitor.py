@@ -100,7 +100,12 @@ def check_status(driver):
     )
     btn.click()
 
-    time.sleep(4)
+    WebDriverWait(driver, 15).until(
+        lambda d: any(
+            kw in d.find_element(By.TAG_NAME, "body").text.lower()
+            for kw in ["appeal", "ban", "under review"]
+        )
+    )
 
     page_text = driver.find_element(By.TAG_NAME, "body").text
 
@@ -130,8 +135,6 @@ def main():
 
     logger.info("EAC Appeal Monitor iniciado!")
     logger.info("Reference ID: " + REFERENCE_ID)
-
-    send_whatsapp("mensagem teste")
 
     while True:
         attempt_count += 1
