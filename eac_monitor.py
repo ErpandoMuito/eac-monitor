@@ -4,12 +4,10 @@ import os
 import time
 import logging
 from datetime import datetime
-from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+import undetected_chromedriver as uc
 from twilio.rest import Client
 
 # ============================================
@@ -63,28 +61,20 @@ def send_whatsapp(message):
 
 
 def create_driver():
-    opts = Options()
+    opts = uc.ChromeOptions()
     opts.add_argument("--headless=new")
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--disable-gpu")
-    opts.add_argument("--disable-extensions")
-    opts.add_argument("--blink-settings=imagesEnabled=false")
     opts.add_argument("--window-size=1920,1080")
-    opts.add_argument(
-        "user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    )
     chrome_bin = os.environ.get("CHROME_BIN")
     if chrome_bin:
         opts.binary_location = chrome_bin
     chromedriver_path = os.environ.get("CHROMEDRIVER_PATH")
+    kwargs = {"options": opts}
     if chromedriver_path:
-        svc = Service(chromedriver_path)
-    else:
-        from webdriver_manager.chrome import ChromeDriverManager
-        svc = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=svc, options=opts)
+        kwargs["driver_executable_path"] = chromedriver_path
+    driver = uc.Chrome(**kwargs)
     driver.set_page_load_timeout(30)
     return driver
 
@@ -112,33 +102,32 @@ def check_status(driver):
     )
     btn.click()
 
-    # Espera ate uma das frases de status aparecer na pagina
+    # Espera o paragrafo que contem "ban appeal" aparecer apos o clique
     try:
-        WebDriverWait(driver, 20).until(
-            lambda d: any(
-                kw in d.find_element(By.TAG_NAME, "body").text.lower()
-                for kw in status_lower
+        appeal_el = WebDriverWait(driver, 30).until(
+            lambda d: next(
+                (p for p in d.find_elements(By.TAG_NAME, "p")
+                 if "ban appeal" in p.text.lower()),
+                None
             )
         )
     except Exception:
-        pass
+        appeal_el = None
 
+    if appeal_el:
+        appeal_text = appeal_el.text
+        for kw in status_keywords:
+            if kw.lower() in appeal_text.lower():
+                return kw
+        return "DESCONHECIDO: " + appeal_text.strip()[:300]
+
+    # Fallback: busca no body inteiro
     page_text = driver.find_element(By.TAG_NAME, "body").text
-
     for kw in status_keywords:
         if kw.lower() in page_text.lower():
             return kw
 
-    # Se nao achou, corta footer pra mostrar o que tem
-    for cutoff in ["Licensing", "Epic Games Store", "Terms of Service", "Privacy Policy"]:
-        idx = page_text.find(cutoff)
-        if idx > 0:
-            page_text = page_text[:idx]
-            break
-    else:
-        page_text = page_text[:500]
-
-    return "DESCONHECIDO: " + page_text.strip()[-200:]
+    return "DESCONHECIDO (elemento nao encontrado): " + page_text.strip()[:300]
 
 
 def main():
