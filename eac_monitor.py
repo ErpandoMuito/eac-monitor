@@ -5,6 +5,7 @@ import re
 import time
 import logging
 from datetime import datetime
+import requests
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -19,6 +20,8 @@ TWILIO_ACCOUNT_SID = "ACd9391742c4758eca6a10fbd06a9602e6"
 TWILIO_AUTH_TOKEN = "14c5db9d935f8bcd1faa86a612248501"
 TWILIO_WHATSAPP_FROM = "whatsapp:+14155238886"
 MY_WHATSAPP_NUMBER = "whatsapp:+5511941465264"
+
+TWOCAPTCHA_KEY = os.environ.get("TWOCAPTCHA_KEY", "")
 
 CHECK_INTERVAL = 600
 REFERENCE_ID = "95727d1e-f75d-42bd-804b-78512bff11e8"
@@ -70,6 +73,37 @@ def create_driver():
     return driver
 
 
+def solve_hcaptcha(sitekey, page_url):
+    resp = requests.post("https://2captcha.com/in.php", data={
+        "key": TWOCAPTCHA_KEY,
+        "method": "hcaptcha",
+        "sitekey": sitekey,
+        "pageurl": page_url,
+        "json": 1
+    })
+    data = resp.json()
+    if data["status"] != 1:
+        raise Exception("2Captcha submit: " + str(data))
+    task_id = data["request"]
+    logger.info("2Captcha task: " + task_id)
+
+    for _ in range(60):
+        time.sleep(5)
+        resp = requests.get("https://2captcha.com/res.php", params={
+            "key": TWOCAPTCHA_KEY,
+            "action": "get",
+            "id": task_id,
+            "json": 1
+        })
+        data = resp.json()
+        if data["status"] == 1:
+            return data["request"]
+        if data["request"] != "CAPCHA_NOT_READY":
+            raise Exception("2Captcha solve: " + str(data))
+
+    raise Exception("2Captcha timeout")
+
+
 def find_appeal_status(page_text):
     skip = {'an', 'be', 'is', 'are', 'was', 'were', 'has', 'have', 'had',
             'the', 'a', 'for', 'through', 'on', 'to', 'and', 'or', 'not',
@@ -83,7 +117,35 @@ def find_appeal_status(page_text):
 
 def check_status(driver):
     driver.get(EAC_URL)
+    time.sleep(3)
 
+    # Extrai hCaptcha sitekey da pagina
+    sitekey = None
+    m = re.search(r'data-sitekey="([^"]+)"', driver.page_source)
+    if m:
+        sitekey = m.group(1)
+        logger.info("hCaptcha sitekey: " + sitekey)
+
+    # Resolve hCaptcha via 2Captcha se a key estiver configurada
+    captcha_token = None
+    if sitekey and TWOCAPTCHA_KEY:
+        try:
+            captcha_token = solve_hcaptcha(sitekey, EAC_URL)
+            logger.info("hCaptcha resolvido!")
+
+            # Injeta o token nos campos de resposta do captcha
+            driver.execute_script("""
+                var token = arguments[0];
+                document.querySelectorAll(
+                    '[name="h-captcha-response"], [name="g-recaptcha-response"]'
+                ).forEach(function(el) { el.innerHTML = token; el.value = token; });
+            """, captcha_token)
+        except Exception as e:
+            logger.error("Erro 2Captcha: " + str(e))
+    elif not TWOCAPTCHA_KEY:
+        logger.warning("TWOCAPTCHA_KEY nao configurada - hCaptcha nao sera resolvido")
+
+    # Clica no botao Check reference ID
     btn = WebDriverWait(driver, 20).until(
         EC.element_to_be_clickable((By.XPATH,
             "//*[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ',"
@@ -92,7 +154,19 @@ def check_status(driver):
     )
     btn.click()
 
-    # Espera ate 60s pelo status do appeal aparecer na pagina
+    # Se o captcha foi resolvido, tenta chamar o callback do hCaptcha
+    if captcha_token:
+        time.sleep(2)
+        driver.execute_script("""
+            var token = arguments[0];
+            var el = document.querySelector('[data-callback]');
+            if (el) {
+                var fn = el.getAttribute('data-callback');
+                if (fn && window[fn]) window[fn](token);
+            }
+        """, captcha_token)
+
+    # Espera ate 60s pelo status do appeal aparecer
     try:
         WebDriverWait(driver, 60).until(
             lambda d: find_appeal_status(
@@ -103,7 +177,7 @@ def check_status(driver):
         pass
 
     page_text = driver.find_element(By.TAG_NAME, "body").text
-    logger.info("Texto da pagina (500 chars): " + page_text[:500])
+    logger.info("Texto da pagina: " + page_text[:1000])
 
     status = find_appeal_status(page_text)
     if status:
@@ -120,6 +194,8 @@ def main():
 
     logger.info("EAC Appeal Monitor iniciado!")
     logger.info("Reference ID: " + REFERENCE_ID)
+    if not TWOCAPTCHA_KEY:
+        logger.warning("TWOCAPTCHA_KEY nao definida! Setar no ambiente do Render.")
 
     while True:
         attempt_count += 1
