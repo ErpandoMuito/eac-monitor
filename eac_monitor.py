@@ -131,6 +131,8 @@ def main():
     logger.info("EAC Appeal Monitor iniciado!")
     logger.info("Reference ID: " + REFERENCE_ID)
 
+    send_whatsapp("mensagem teste")
+
     while True:
         attempt_count += 1
         elapsed = get_elapsed_time(start_time)
