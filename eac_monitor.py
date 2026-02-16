@@ -115,16 +115,49 @@ def find_appeal_status(page_text):
     return None
 
 
-def check_status(driver):
-    driver.get(EAC_URL)
-    time.sleep(3)
-
-    # Extrai hCaptcha sitekey da pagina
-    sitekey = None
+def extract_sitekey(driver):
+    """Tenta extrair o hCaptcha sitekey de varias formas."""
+    # Tenta no HTML direto
     m = re.search(r'data-sitekey="([^"]+)"', driver.page_source)
     if m:
-        sitekey = m.group(1)
+        return m.group(1)
+    # Tenta via iframe do hCaptcha
+    m = re.search(r'hcaptcha\.com/captcha/v1/([a-f0-9\-]+)', driver.page_source)
+    if m:
+        return m.group(1)
+    # Tenta via elemento DOM
+    try:
+        el = driver.find_element(By.CSS_SELECTOR, '[data-sitekey]')
+        return el.get_attribute('data-sitekey')
+    except Exception:
+        pass
+    # Tenta via JavaScript
+    try:
+        return driver.execute_script(
+            "var el = document.querySelector('[data-sitekey]'); "
+            "return el ? el.getAttribute('data-sitekey') : null;"
+        )
+    except Exception:
+        pass
+    return None
+
+
+def check_status(driver):
+    driver.get(EAC_URL)
+    time.sleep(5)
+
+    # Espera ate 15s pelo hCaptcha carregar e extrai sitekey
+    sitekey = None
+    for _ in range(5):
+        sitekey = extract_sitekey(driver)
+        if sitekey:
+            break
+        time.sleep(3)
+
+    if sitekey:
         logger.info("hCaptcha sitekey: " + sitekey)
+    else:
+        logger.warning("hCaptcha sitekey NAO encontrado no HTML")
 
     # Resolve hCaptcha via 2Captcha se a key estiver configurada
     captcha_token = None
